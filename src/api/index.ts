@@ -1,0 +1,20 @@
+export * from './request';
+export * from './mock';
+export * from './auth';
+export * from './elder';
+export * from './health';
+export * from './alert';
+export * from './service';
+export * from './medication';
+export * from './visit';
+export * from './finance';
+
+export { default as request } from './request';
+export { default as authApi } from './auth';
+export { default as elderApi } from './elder';
+export { default as healthApi } from './health';
+export { default as alertApi } from './alert';
+export { default as serviceApi } from './service';
+export { default as medicationApi } from './medication';
+export { default as visitApi } from './visit';
+export { default as financeApi } from './finance';
