@@ -199,6 +199,26 @@ export interface Bill {
   paymentMethod?: string;
 }
 
+export interface HandoverItem {
+  type: 'service' | 'medication' | 'alert';
+  refId: string;
+  title: string;
+  elderName: string;
+  detail: string;
+  status: string;
+}
+
+export interface HandoverRecord {
+  id: string;
+  fromCaregiverId: string;
+  fromCaregiverName: string;
+  toCaregiverId: string;
+  toCaregiverName: string;
+  createdAt: string;
+  shiftNote: string;
+  items: HandoverItem[];
+}
+
 export interface PaginationParams {
   page?: number;
   pageSize?: number;

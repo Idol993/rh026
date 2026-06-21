@@ -1,99 +1,181 @@
-import { useMemo } from 'react';
-import { Card, Tag, List, Badge } from 'antd';
+import { useMemo, useEffect } from 'react';
+import { Card, Tag, List, Badge, Timeline, Button, Divider } from 'antd';
 import {
-  FileTextOutlined,
-  MedicineBoxOutlined,
-  AlertOutlined,
-  ArrowRightOutlined,
-  UserOutlined,
-  CalendarOutlined,
-  SafetyCertificateOutlined,
+  FileTextOutlined, MedicineBoxOutlined, AlertOutlined,
+  ArrowRightOutlined, CalendarOutlined, SafetyCertificateOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
-import type { CareService, MedicationRecord, Alert } from '@/types';
-import { mockCareServices, mockMedicationRecords, mockAlerts } from '@/mock';
+import { useCareServiceStore } from '@/stores/careServiceStore';
+import { useMedicationStore } from '@/stores/medicationStore';
+import { useAlertStore, ALERT_TYPE_MAP, CARE_SERVICE_STATUS_MAP, MED_STATUS_MAP } from '@/stores/alertStore';
 import { useAuthStore } from '@/stores/authStore';
+import type { CareService, MedicationRecord, Alert, HandoverItem } from '@/types';
 
-const getGreeting = (): string => {
-  const hour = dayjs().hour();
-  if (hour < 12) return '早上好';
-  if (hour < 18) return '下午好';
-  return '晚上好';
-};
-
-const alertTypeMap: Record<string, string> = {
-  fall: '跌倒',
-  inactivity: '活动异常',
-  out_of_bed: '离床',
-  heart_rate: '心率异常',
-  respiration: '呼吸异常',
-  sos: 'SOS紧急呼叫',
-  medication_miss: '漏服药',
-  door: '房门异常',
-  smoke: '烟雾报警',
-  gas: '燃气泄漏',
+const getGreeting = () => {
+  const h = dayjs().hour();
+  return h < 12 ? '早上好' : h < 18 ? '下午好' : '晚上好';
 };
 
 const alertLevelMap: Record<number, { color: string; label: string }> = {
-  1: { color: 'blue', label: '低' },
-  2: { color: 'orange', label: '中' },
-  3: { color: 'red', label: '高' },
+  1: { color: 'blue', label: '低' }, 2: { color: 'orange', label: '中' }, 3: { color: 'red', label: '高' },
 };
 
-const taskStatusMap: Record<string, { color: string; label: string }> = {
-  scheduled: { color: 'blue', label: '待执行' },
-  in_progress: { color: 'orange', label: '进行中' },
+type TimelineItemType = 'service' | 'medication' | 'alert';
+
+interface MergedTimelineItem {
+  id: string;
+  type: TimelineItemType;
+  timestamp: string;
+  elderName: string;
+  title: string;
+  operator?: string;
+  status: string;
+  color: string;
+  note?: string;
+}
+
+const HANDOVER_COLORS: Record<HandoverItem['type'], string> = {
+  service: '#4CAF50', medication: '#1E88E5', alert: '#F44336',
 };
 
-const medStatusMap: Record<string, { color: string; label: string }> = {
-  scheduled: { color: 'blue', label: '待服药' },
-  missed: { color: 'red', label: '漏服' },
-  refused: { color: 'orange', label: '拒服' },
+const HANDOVER_LABELS: Record<HandoverItem['type'], string> = {
+  service: '服务', medication: '服药', alert: '告警',
+};
+
+const TYPE_ICONS: Record<TimelineItemType, JSX.Element> = {
+  service: <FileTextOutlined />, medication: <MedicineBoxOutlined />, alert: <AlertOutlined />,
 };
 
 export default function CaregiverHome() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const todayStr = dayjs().format('YYYY-MM-DD');
 
-  const todayTasks = useMemo(
-    () =>
-      mockCareServices.filter(
-        (s) =>
-          dayjs(s.scheduledAt).format('YYYY-MM-DD') === todayStr &&
-          (s.status === 'scheduled' || s.status === 'in_progress'),
-      ),
-    [todayStr],
+  const initServices = useCareServiceStore(s => s.initIfNeeded);
+  const initMeds = useMedicationStore(s => s.initIfNeeded);
+  const initAlerts = useAlertStore(s => s.initIfNeeded);
+  const getTodayServices = useCareServiceStore(s => s.getTodayServices);
+  const getTodayRecords = useMedicationStore(s => s.getTodayRecords);
+  const getTodayAlerts = useAlertStore(s => s.getTodayAlerts);
+  const getLatestHandover = useAlertStore(s => s.getLatestHandoverForToday);
+
+  useEffect(() => { initServices(); initMeds(); initAlerts(); }, [initServices, initMeds, initAlerts]);
+
+  const todayServices = useMemo(() => getTodayServices(), [getTodayServices]);
+  const todayMeds = useMemo(() => getTodayRecords(), [getTodayRecords]);
+  const todayAlerts = useMemo(() => getTodayAlerts(), [getTodayAlerts]);
+  const latestHandover = useMemo(() => getLatestHandover(), [getLatestHandover]);
+
+  const pendingTasks = useMemo(
+    () => todayServices.filter(s => s.status === 'scheduled' || s.status === 'in_progress'),
+    [todayServices],
+  );
+  const pendingMeds = useMemo(
+    () => todayMeds.filter(m => ['scheduled', 'missed', 'refused'].includes(m.status)),
+    [todayMeds],
+  );
+  const scheduledMedCount = pendingMeds.filter(m => m.status === 'scheduled').length;
+  const missedMedCount = pendingMeds.filter(m => m.status === 'missed').length;
+  const pendingAlerts = useMemo(
+    () => todayAlerts.filter(a => a.status !== 'resolved' && a.status !== 'closed'),
+    [todayAlerts],
   );
 
-  const todayMedications = useMemo(
-    () =>
-      mockMedicationRecords.filter(
-        (m) =>
-          dayjs(m.scheduledTime).format('YYYY-MM-DD') === todayStr &&
-          (m.status === 'scheduled' || m.status === 'missed' || m.status === 'refused'),
-      ),
-    [todayStr],
-  );
+  const timelineItems = useMemo(() => {
+    const items: MergedTimelineItem[] = [];
 
-  const todayAlerts = useMemo(
-    () =>
-      mockAlerts.filter(
-        (a) =>
-          dayjs(a.triggeredAt).format('YYYY-MM-DD') === todayStr &&
-          a.status !== 'resolved' && a.status !== 'closed',
-      ),
-    [todayStr],
-  );
+    todayServices.forEach(s => {
+      if (!['completed', 'in_progress', 'missed'].includes(s.status)) return;
+      items.push({
+        id: `svc-${s.id}`, type: 'service',
+        timestamp: s.completedAt || s.startedAt || s.scheduledAt,
+        elderName: s.elderName, title: s.type, operator: s.caregiverName,
+        status: CARE_SERVICE_STATUS_MAP[s.status] || s.status,
+        color: '#4CAF50', note: s.notes,
+      });
+    });
 
-  const taskCount = todayTasks.length;
-  const medCount = todayMedications.filter((m) => m.status === 'scheduled').length;
-  const missedCount = todayMedications.filter((m) => m.status === 'missed').length;
-  const alertCount = todayAlerts.length;
+    todayMeds.forEach(m => {
+      if (!['taken', 'missed', 'refused'].includes(m.status)) return;
+      items.push({
+        id: `med-${m.id}`, type: 'medication',
+        timestamp: m.takenAt || m.scheduledTime,
+        elderName: m.elderName || '', title: m.medicationName, operator: m.notedBy,
+        status: MED_STATUS_MAP[m.status] || m.status,
+        color: '#1E88E5', note: m.note,
+      });
+    });
+
+    todayAlerts.forEach(a => {
+      if (!['resolved', 'closed', 'processing'].includes(a.status)) return;
+      const statusLabel = a.status === 'processing' ? '处理中' : a.status === 'resolved' ? '已解决' : '已关闭';
+      const lastNote = a.handlingNotes.length > 0 ? a.handlingNotes[a.handlingNotes.length - 1].note : a.description;
+      items.push({
+        id: `alert-${a.id}`, type: 'alert',
+        timestamp: a.resolvedAt || a.acknowledgedAt || a.triggeredAt,
+        elderName: a.elderName || '', title: ALERT_TYPE_MAP[a.type] || a.type, operator: a.assignedToName,
+        status: statusLabel, color: '#F44336', note: lastNote,
+      });
+    });
+
+    return items
+      .sort((a, b) => dayjs(b.timestamp).valueOf() - dayjs(a.timestamp).valueOf())
+      .slice(0, 20);
+  }, [todayServices, todayMeds, todayAlerts]);
+
+  const cardGradient = (c1: string, c2: string) =>
+    `linear-gradient(135deg, ${c1} 0%, ${c2} 100%)`;
+
+  const EntryCard = ({
+    onClick, color1, color2, icon, title, count, countText,
+    extraBadge, data, renderItem,
+  }: {
+    onClick: () => void; color1: string; color2: string;
+    icon: React.ReactNode; title: string; count: number; countText: React.ReactNode;
+    extraBadge?: React.ReactNode;
+    data: any[];
+    renderItem: (item: any) => React.ReactNode;
+  }) => (
+    <Card
+      onClick={onClick}
+      className="cursor-pointer rounded-2xl shadow-sm border-0 hover:shadow-md transition-shadow"
+      styles={{ body: { padding: 0, background: cardGradient(color1, color2) } }}
+    >
+      <div className="px-5 pt-5 pb-3 text-white">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">{icon}</span>
+            <span className="text-lg font-semibold">{title}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge count={count} showZero size="default" color="#fff"
+              style={{ color: color1, fontWeight: 'bold' }} />
+            {extraBadge}
+          </div>
+        </div>
+        <div className="mt-3 flex items-baseline gap-1">
+          <span className="text-4xl font-bold">{count}</span>
+          <span className="text-white/80 text-sm">{countText}</span>
+        </div>
+      </div>
+      <div className="bg-white rounded-b-2xl">
+        <List size="small" dataSource={data.slice(0, 2)}
+          locale={{ emptyText: '暂无数据' }}
+          renderItem={(item) => (
+            <List.Item className="px-5 py-3 border-0">{renderItem(item)}</List.Item>
+          )} />
+        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between"
+          style={{ color: color1 }}>
+          <span className="text-sm font-medium">查看全部</span>
+          <ArrowRightOutlined />
+        </div>
+      </div>
+    </Card>
+  );
 
   return (
-    <div className="p-4 max-w-lg mx-auto space-y-4">
+    <div className="p-4 max-w-lg mx-auto space-y-4 pb-8">
       <div className="pt-2 pb-1">
         <div className="flex items-center gap-2 text-2xl font-bold text-gray-800">
           <span>{getGreeting()}</span>
@@ -106,164 +188,169 @@ export default function CaregiverHome() {
         </div>
       </div>
 
-      <Card
+      <EntryCard
         onClick={() => navigate('/caregiver/tasks')}
-        className="cursor-pointer rounded-2xl shadow-sm border-0 hover:shadow-md transition-shadow"
-        styles={{ body: { padding: 0, background: 'linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%)' } }}
-      >
-        <div className="px-5 pt-5 pb-3 text-white">
-          <div className="flex items-center justify-between">
+        color1="#4CAF50" color2="#66BB6A"
+        icon={<FileTextOutlined />} title="今日照护任务"
+        count={pendingTasks.length} countText="项待执行/进行中"
+        data={pendingTasks}
+        renderItem={(item: CareService) => (
+          <div className="flex-1 flex items-center justify-between w-full">
             <div className="flex items-center gap-2">
-              <FileTextOutlined className="text-2xl" />
-              <span className="text-lg font-semibold">今日照护任务</span>
+              <span className="font-medium text-gray-800">{item.elderName}</span>
+              <Tag color={item.status === 'in_progress' ? 'orange' : 'blue'} className="m-0">
+                {item.type}
+              </Tag>
             </div>
-            <Badge count={taskCount} showZero size="default" offset={[0, 0]} color="#fff" style={{ color: '#4CAF50', fontWeight: 'bold' }} />
+            <span className="text-gray-500 text-sm">{dayjs(item.scheduledAt).format('HH:mm')}</span>
           </div>
-          <div className="mt-3 flex items-baseline gap-1">
-            <span className="text-4xl font-bold">{taskCount}</span>
-            <span className="text-white/80 text-sm">项待执行/进行中</span>
-          </div>
-        </div>
-        <div className="bg-white rounded-b-2xl">
-          <List
-            size="small"
-            dataSource={todayTasks.slice(0, 2)}
-            locale={{ emptyText: '暂无待办任务' }}
-            renderItem={(item: CareService) => (
-              <List.Item className="px-5 py-3 border-0">
-                <div className="flex-1 flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-800">{item.elderName}</span>
-                    <Tag color={taskStatusMap[item.status].color} className="m-0">
-                      {item.type}
-                    </Tag>
-                  </div>
-                  <span className="text-gray-500 text-sm">{dayjs(item.scheduledAt).format('HH:mm')}</span>
-                </div>
-              </List.Item>
-            )}
-          />
-          <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between text-[#4CAF50]">
-            <span className="text-sm font-medium">查看全部</span>
-            <ArrowRightOutlined />
-          </div>
-        </div>
-      </Card>
+        )}
+      />
 
-      <Card
+      <EntryCard
         onClick={() => navigate('/caregiver/medication')}
-        className="cursor-pointer rounded-2xl shadow-sm border-0 hover:shadow-md transition-shadow"
-        styles={{ body: { padding: 0, background: 'linear-gradient(135deg, #1E88E5 0%, #42A5F5 100%)' } }}
-      >
-        <div className="px-5 pt-5 pb-3 text-white">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <MedicineBoxOutlined className="text-2xl" />
-              <span className="text-lg font-semibold">待服药提醒</span>
+        color1="#1E88E5" color2="#42A5F5"
+        icon={<MedicineBoxOutlined />} title="待服药提醒"
+        count={scheduledMedCount + missedMedCount}
+        countText={
+          missedMedCount > 0
+            ? <span>项待处理<span className="ml-1 text-yellow-200">（含漏服{missedMedCount}）</span></span>
+            : '项待处理'
+        }
+        extraBadge={
+          missedMedCount > 0
+            ? <Badge count={`漏${missedMedCount}`} size="small" color="#FF5252" />
+            : undefined
+        }
+        data={pendingMeds}
+        renderItem={(item: MedicationRecord) => {
+          const tagColor = item.status === 'scheduled' ? 'blue' : item.status === 'missed' ? 'red' : 'orange';
+          return (
+            <div className="flex-1 flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-800">{item.elderName}</span>
+                <Tag color={tagColor} className="m-0">{item.medicationName}</Tag>
+              </div>
+              <span className="text-gray-500 text-sm">{dayjs(item.scheduledTime).format('HH:mm')}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Badge count={medCount} showZero size="small" color="#fff" style={{ color: '#1E88E5', fontWeight: 'bold' }} />
-              {missedCount > 0 && (
-                <Badge count={`漏${missedCount}`} size="small" color="#FF5252" />
-              )}
-            </div>
-          </div>
-          <div className="mt-3 flex items-baseline gap-1">
-            <span className="text-4xl font-bold">{medCount + missedCount}</span>
-            <span className="text-white/80 text-sm">
-              项待处理
-              {missedCount > 0 && <span className="ml-1 text-yellow-200">（含漏服{missedCount}）</span>}
-            </span>
-          </div>
-        </div>
-        <div className="bg-white rounded-b-2xl">
-          <List
-            size="small"
-            dataSource={todayMedications.slice(0, 2)}
-            locale={{ emptyText: '暂无服药提醒' }}
-            renderItem={(item: MedicationRecord) => (
-              <List.Item className="px-5 py-3 border-0">
-                <div className="flex-1 flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-800">{item.elderName}</span>
-                    <Tag color={medStatusMap[item.status].color} className="m-0">
-                      {item.medicationName}
-                    </Tag>
-                  </div>
-                  <span className="text-gray-500 text-sm">{dayjs(item.scheduledTime).format('HH:mm')}</span>
-                </div>
-              </List.Item>
-            )}
-          />
-          <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between text-[#1E88E5]">
-            <span className="text-sm font-medium">查看全部</span>
-            <ArrowRightOutlined />
-          </div>
-        </div>
-      </Card>
+          );
+        }}
+      />
 
-      <Card
+      <EntryCard
         onClick={() => navigate('/caregiver/alerts')}
-        className="cursor-pointer rounded-2xl shadow-sm border-0 hover:shadow-md transition-shadow"
-        styles={{ body: { padding: 0, background: 'linear-gradient(135deg, #F44336 0%, #EF5350 100%)' } }}
-      >
-        <div className="px-5 pt-5 pb-3 text-white">
-          <div className="flex items-center justify-between">
+        color1="#F44336" color2="#EF5350"
+        icon={<AlertOutlined />} title="待处理告警"
+        count={pendingAlerts.length} countText="项告警待处理"
+        data={pendingAlerts}
+        renderItem={(item: Alert) => (
+          <div className="flex-1 flex items-center justify-between w-full">
             <div className="flex items-center gap-2">
-              <AlertOutlined className="text-2xl" />
-              <span className="text-lg font-semibold">待处理告警</span>
+              <span className="font-medium text-gray-800">{ALERT_TYPE_MAP[item.type] || item.type}</span>
+              <span className="text-gray-500 text-sm">{item.elderName}</span>
+              <Tag color={alertLevelMap[item.level].color} className="m-0">
+                {alertLevelMap[item.level].label}级
+              </Tag>
             </div>
-            <Badge count={alertCount} showZero size="default" color="#fff" style={{ color: '#F44336', fontWeight: 'bold' }} />
+            <span className="text-gray-500 text-sm">{dayjs(item.triggeredAt).format('HH:mm')}</span>
           </div>
-          <div className="mt-3 flex items-baseline gap-1">
-            <span className="text-4xl font-bold">{alertCount}</span>
-            <span className="text-white/80 text-sm">项告警待处理</span>
+        )}
+      />
+
+      <Card className="rounded-2xl shadow-sm border-0"
+        styles={{ body: { padding: '16px 20px' } }}
+        title={
+          <div className="flex items-center gap-2 font-semibold text-gray-800">
+            <ReloadOutlined className="text-gray-500" />
+            <span>值班进度时间线</span>
+            <Tag color="blue" className="m-0 ml-auto">{timelineItems.length} 条记录</Tag>
           </div>
-        </div>
-        <div className="bg-white rounded-b-2xl">
-          <List
-            size="small"
-            dataSource={todayAlerts.slice(0, 2)}
-            locale={{ emptyText: '暂无待处理告警' }}
-            renderItem={(item: Alert) => (
-              <List.Item className="px-5 py-3 border-0">
-                <div className="flex-1 flex items-center justify-between w-full">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-800">{alertTypeMap[item.type] || item.type}</span>
-                    <span className="text-gray-500 text-sm">{item.elderName}</span>
-                    <Tag color={alertLevelMap[item.level].color} className="m-0">
-                      {alertLevelMap[item.level].label}级
-                    </Tag>
-                  </div>
-                  <span className="text-gray-500 text-sm">{dayjs(item.triggeredAt).format('HH:mm')}</span>
+        }>
+        {timelineItems.length === 0 ? (
+          <div className="text-center text-gray-400 py-8 text-sm">暂无值班记录</div>
+        ) : (
+          <Timeline items={timelineItems.map(t => ({
+            color: t.color,
+            dot: <span style={{ color: t.color }}>{TYPE_ICONS[t.type]}</span>,
+            children: (
+              <div className="mb-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-gray-800 text-sm">
+                    {t.elderName} · {t.title}
+                  </span>
+                  <span className="text-gray-400 text-xs">{dayjs(t.timestamp).format('HH:mm')}</span>
                 </div>
-              </List.Item>
-            )}
-          />
-          <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between text-[#F44336]">
-            <span className="text-sm font-medium">查看全部</span>
-            <ArrowRightOutlined />
-          </div>
-        </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <Tag color={t.color} className="m-0" style={{ fontSize: '11px', padding: '0 6px' }}>
+                    {t.status}
+                  </Tag>
+                  {t.operator && <span className="text-xs text-gray-400">处理人：{t.operator}</span>}
+                </div>
+                {t.note && (
+                  <div className="text-xs text-gray-500 mt-1 bg-gray-50 rounded px-2 py-1">{t.note}</div>
+                )}
+              </div>
+            ),
+          }))} />
+        )}
       </Card>
 
-      <Card className="rounded-2xl shadow-sm border-0" styles={{ body: { padding: '16px 20px' } }}>
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-full bg-[#FFF3E0] flex items-center justify-center flex-shrink-0">
-            <SafetyCertificateOutlined className="text-xl text-[#FF9800]" />
-          </div>
-          <div className="flex-1">
-            <div className="font-semibold text-gray-800">今日值班提醒</div>
-            <div className="text-sm text-gray-500 mt-1">
-              今日 <span className="text-[#FF9800] font-medium">{user?.name || '您'}</span> 负责白班（08:00-20:00），请按时完成各项照护任务，关注老人健康状态。
+      {latestHandover && (
+        <Card className="rounded-2xl shadow-sm border-0"
+          styles={{ body: { padding: '16px 20px' } }}
+          title={
+            <div className="flex items-center gap-2 font-semibold text-gray-800">
+              <SafetyCertificateOutlined className="text-[#FF9800]" />
+              <span>最新交接记录</span>
             </div>
-            <div className="flex items-center gap-1 mt-2 text-xs text-gray-400">
-              <UserOutlined />
-              <span>当前在岗 · 正常值班</span>
+          }>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-700">{latestHandover.fromCaregiverName}</span>
+                <ArrowRightOutlined className="text-gray-400" />
+                <span className="font-medium text-[#4CAF50]">{latestHandover.toCaregiverName}</span>
+              </div>
+              <span className="text-gray-400 text-xs">{dayjs(latestHandover.createdAt).format('HH:mm')}</span>
             </div>
+            {latestHandover.shiftNote && (
+              <div className="text-sm text-gray-600 bg-[#FFF8E1] rounded-lg px-3 py-2">
+                {latestHandover.shiftNote}
+              </div>
+            )}
+            {latestHandover.items.length > 0 && (
+              <>
+                <Divider style={{ margin: '8px 0' }} />
+                <div className="space-y-2">
+                  {latestHandover.items.map((item, idx) => (
+                    <div key={idx} className="flex items-start gap-2 text-sm">
+                      <Tag color={HANDOVER_COLORS[item.type]} className="m-0 mt-0.5"
+                        style={{ fontSize: '11px', padding: '0 6px' }}>
+                        {HANDOVER_LABELS[item.type]}
+                      </Tag>
+                      <div className="flex-1">
+                        <span className="font-medium text-gray-700">{item.elderName}</span>
+                        <span className="text-gray-500 ml-1">{item.title}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
-        </div>
-      </Card>
+        </Card>
+      )}
+
+      <Button type="primary" size="large" block
+        onClick={() => navigate('/caregiver/handover')}
+        className="rounded-xl h-12 text-base font-medium"
+        style={{
+          background: 'linear-gradient(135deg, #FF9800 0%, #FFB74D 100%)',
+          border: 'none', boxShadow: '0 4px 12px rgba(255, 152, 0, 0.3)',
+        }}
+        icon={<SafetyCertificateOutlined />}>
+        开始交班
+      </Button>
     </div>
   );
 }

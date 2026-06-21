@@ -1,8 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Card, Tag, Button, Modal, Form, Input, Collapse, Row, Col, Statistic, Empty, Select, message, Upload } from 'antd';
-import { ClockCircleOutlined, PlayCircleOutlined, CheckCircleOutlined, UserOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState, useRef } from 'react';
+import { Card, Tag, Button, Modal, Form, Input, Collapse, Row, Col, Statistic, Empty, Select, message, Upload, Rate } from 'antd';
+import { ClockCircleOutlined, PlayCircleOutlined, CheckCircleOutlined, UserOutlined, SearchOutlined, UploadOutlined, SwapOutlined } from '@ant-design/icons';
 import type { CareService } from '@/types';
-import { mockCareServices, mockElders } from '@/mock';
+import { useCareServiceStore } from '@/stores/careServiceStore';
+import { mockElders } from '@/mock';
 import dayjs from 'dayjs';
 
 const SERVICE_TYPES = ['翻身', '喂食', '洗澡', '理发', '口腔护理', '压疮护理', '康复训练', '心理慰藉', '清洁消毒', '晨间护理', '协助进食', '生命体征测量', '协助如厕', '协助服药', '户外活动'];
@@ -10,27 +12,41 @@ const typeColors: Record<string, string> = { '翻身': 'purple', '喂食': 'oran
 const elderStatusOptions = ['良好', '一般', '较差'];
 
 export default function CaregiverTasks() {
-  const [services, setServices] = useState<CareService[]>(mockCareServices);
+  const navigate = useNavigate();
+  const initServices = useCareServiceStore(s => s.initIfNeeded);
+  const { startService, completeService, getTodayServices } = useCareServiceStore(s => ({
+    startService: s.startService,
+    completeService: s.completeService,
+    getTodayServices: s.getTodayServices,
+  }));
+
   const [searchName, setSearchName] = useState('');
   const [filterType, setFilterType] = useState<string | undefined>(undefined);
   const [completeModal, setCompleteModal] = useState<CareService | null>(null);
   const [form] = Form.useForm();
-  const [, setTimerTick] = useState(0);
-
-  const roomMap = useMemo(() => Object.fromEntries(mockElders.map(e => [e.id, e.roomNumber ?? ''])), []);
+  const [, setNow] = useState(0);
+  const didInit = useRef(false);
 
   useEffect(() => {
-    const timer = setInterval(() => setTimerTick(t => t + 1), 1000);
+    if (!didInit.current) {
+      didInit.current = true;
+      initServices();
+    }
+  }, [initServices]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(t => t + 1), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const todayStr = dayjs().format('YYYY-MM-DD');
-  const filteredServices = useMemo(() => services.filter(s => {
-    const matchDay = dayjs(s.scheduledAt).format('YYYY-MM-DD') === todayStr;
+  const todayServices = getTodayServices();
+  const roomMap = useMemo(() => Object.fromEntries(mockElders.map(e => [e.id, e.roomNumber ?? ''])), []);
+
+  const filteredServices = useMemo(() => todayServices.filter(s => {
     const matchName = !searchName || s.elderName.includes(searchName);
     const matchType = !filterType || s.type === filterType;
-    return matchDay && matchName && matchType;
-  }), [services, searchName, filterType, todayStr]);
+    return matchName && matchType;
+  }), [todayServices, searchName, filterType]);
 
   const pending = filteredServices.filter(s => s.status === 'scheduled');
   const inProgress = filteredServices.filter(s => s.status === 'in_progress');
@@ -43,11 +59,11 @@ export default function CaregiverTasks() {
     return `${mins.toString().padStart(2, '0')}分${secs.toString().padStart(2, '0')}秒`;
   };
 
-  const startService = (task: CareService) => {
+  const handleStart = (task: CareService) => {
     Modal.confirm({
       title: '开始服务', content: `确认开始为 ${task.elderName} 提供「${task.type}」服务？`, okText: '确认开始', cancelText: '取消',
       onOk: () => {
-        setServices(prev => prev.map(s => s.id === task.id ? { ...s, status: 'in_progress' as const, startedAt: new Date().toISOString() } : s));
+        startService(task.id);
         message.success('服务已开始，计时中');
       }
     });
@@ -60,15 +76,16 @@ export default function CaregiverTasks() {
 
   const submitComplete = () => {
     form.validateFields().then(values => {
-      const now = new Date().toISOString();
-      const startedAt = completeModal!.startedAt ?? now;
+      const startedAt = completeModal!.startedAt ?? new Date().toISOString();
       const duration = Math.max(1, Math.round((Date.now() - new Date(startedAt).getTime()) / 60000));
-      setServices(prev => prev.map(s => s.id === completeModal!.id ? { ...s, status: 'completed' as const, completedAt: now, duration, elderStatus: values.elderStatus, notes: values.notes } : s));
+      completeService(completeModal!.id, { elderStatus: values.elderStatus, notes: values.notes, duration });
       message.success('服务记录已提交');
       setCompleteModal(null);
       form.resetFields();
     });
   };
+
+  const goHandover = () => navigate('/caregiver/handover', { state: { defaultTab: 'service' } });
 
   return (
     <div className="p-4 max-w-lg mx-auto space-y-4">
@@ -111,7 +128,10 @@ export default function CaregiverTasks() {
       )}
 
       <div className="space-y-3">
-        <div className="font-semibold text-blue-600 flex items-center gap-1"><PlayCircleOutlined /> 待执行任务</div>
+        <div className="flex items-center justify-between">
+          <div className="font-semibold text-blue-600 flex items-center gap-1"><PlayCircleOutlined /> 待执行任务</div>
+          <Button icon={<SwapOutlined />} size="small" onClick={goHandover} className="border-blue-400 text-blue-600 hover:!bg-blue-50">批量交班</Button>
+        </div>
         {pending.length === 0 ? <Empty description="暂无待执行任务" /> : pending.map(task => (
           <Card key={task.id} size="small" className="rounded-xl shadow-sm">
             <div className="flex items-start justify-between">
@@ -125,7 +145,7 @@ export default function CaregiverTasks() {
               <Tag color={typeColors[task.type] ?? 'default'}>{task.type}</Tag>
               <div className="text-sm text-gray-500 flex items-center gap-1"><ClockCircleOutlined /> {dayjs(task.scheduledAt).format('HH:mm')}</div>
             </div>
-            <div className="mt-3"><Button type="primary" icon={<PlayCircleOutlined />} onClick={() => startService(task)} block>开始服务</Button></div>
+            <div className="mt-3"><Button type="primary" icon={<PlayCircleOutlined />} onClick={() => handleStart(task)} block>开始服务</Button></div>
           </Card>
         ))}
       </div>
@@ -140,7 +160,9 @@ export default function CaregiverTasks() {
               <div className="flex justify-between"><span>完成时间</span><span>{dayjs(task.completedAt).format('HH:mm')}</span></div>
               <div className="flex justify-between"><span>老人状态</span><span>{task.elderStatus ?? '—'}</span></div>
               {task.notes && <div><div className="text-gray-500 mb-1">备注</div><div className="bg-gray-50 p-2 rounded">{task.notes}</div></div>}
-              {task.rating && <div className="flex justify-between"><span>评分</span><span className="text-orange-500">{'★'.repeat(task.rating)}</span></div>}
+              {task.rating !== undefined && (
+                <div className="flex justify-between items-center"><span>评分</span><Rate disabled value={task.rating} allowHalf className="text-sm" /></div>
+              )}
               {task.feedback && <div><div className="text-gray-500 mb-1">家属反馈</div><div className="bg-blue-50 p-2 rounded">{task.feedback}</div></div>}
             </div>
           </Card>

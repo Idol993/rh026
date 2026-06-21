@@ -29,6 +29,7 @@ import CaregiverHome from '@/pages/caregiver/CaregiverHome';
 import CaregiverTasks from '@/pages/caregiver/CaregiverTasks';
 import CaregiverAlerts from '@/pages/caregiver/CaregiverAlerts';
 import CaregiverMedication from '@/pages/caregiver/CaregiverMedication';
+import CaregiverHandover from '@/pages/caregiver/CaregiverHandover';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -105,6 +106,7 @@ const AppRoutes = () => {
         <Route path="tasks" element={<CaregiverTasks />} />
         <Route path="alerts" element={<CaregiverAlerts />} />
         <Route path="medication" element={<CaregiverMedication />} />
+        <Route path="handover" element={<CaregiverHandover />} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

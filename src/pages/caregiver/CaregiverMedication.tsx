@@ -1,13 +1,39 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, Tag, Button, Modal, Form, Select, Checkbox, Input, Collapse, Badge, Row, Col, Statistic, message, Empty } from 'antd';
-import { MedicineBoxOutlined, CheckCircleOutlined, WarningOutlined, ClockCircleOutlined, SearchOutlined } from '@ant-design/icons';
+import { MedicineBoxOutlined, CheckCircleOutlined, WarningOutlined, ClockCircleOutlined, SearchOutlined, SwapOutlined } from '@ant-design/icons';
 import type { MedicationRecord } from '@/types';
-import { mockMedicationRecords, mockElders } from '@/mock';
+import { useMedicationStore } from '@/stores/medicationStore';
+import { useAuthStore } from '@/stores/authStore';
+import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 
-const roomMap = Object.fromEntries(mockElders.map(e => [e.id, e.roomNumber ?? '']));
-const dosageMap: Record<string, string> = {};
-mockElders.forEach(e => e.medications.forEach(m => { dosageMap[m.id] = m.dosage; }));
+const roomMap: Record<string, string> = {
+  elder1: '302A',
+  elder2: '201B',
+  elder3: '401A',
+  elder4: '101A',
+  elder6: '305B',
+  elder7: '203A',
+  elder8: '403B',
+  elder10: '102A',
+};
+
+const dosageMap: Record<string, string> = {
+  'elder1-med1': '30mg',
+  'elder1-med2': '0.5g',
+  'elder2-med1': '100mg',
+  'elder2-med2': '20mg',
+  'elder3-med1': '1.2g',
+  'elder4-med1': '30mg',
+  'elder4-med2': '0.5g',
+  'elder4-med3': '0.25g',
+  'elder6-med1': '80mg',
+  'elder6-med2': '20mg',
+  'elder7-med1': '30mg',
+  'elder7-med2': '0.5g',
+  'elder8-med1': '75mg',
+  'elder8-med2': '5mg',
+};
 
 const statusConfig: Record<string, { color: string; label: string }> = {
   scheduled: { color: 'blue', label: '待服' },
@@ -30,25 +56,41 @@ const interveneOptions = [
 ];
 
 export default function CaregiverMedication() {
-  const [records, setRecords] = useState<MedicationRecord[]>(mockMedicationRecords);
+  const navigate = useNavigate();
+  const userName = useAuthStore(s => s.user?.name) ?? '王护工';
+  const { initIfNeeded, confirmTaken, interveneMissed, getTodayRecords } = useMedicationStore(s => ({
+    initIfNeeded: s.initIfNeeded,
+    confirmTaken: s.confirmTaken,
+    interveneMissed: s.interveneMissed,
+    getTodayRecords: s.getTodayRecords,
+  }));
   const [interveneModal, setInterveneModal] = useState<MedicationRecord | null>(null);
   const [searchText, setSearchText] = useState('');
   const [form] = Form.useForm();
 
-  const todayStr = dayjs().format('YYYY-MM-DD');
-  const todayRecords = useMemo(
-    () => records.filter(r => dayjs(r.scheduledTime).format('YYYY-MM-DD') === todayStr),
-    [records, todayStr],
-  );
+  useEffect(() => {
+    initIfNeeded();
+  }, [initIfNeeded]);
+
+  const todayRecords = useMemo(() => getTodayRecords(), [getTodayRecords]);
 
   const filteredRecords = useMemo(
     () => todayRecords.filter(r => (r.elderName ?? '').includes(searchText.trim())),
     [todayRecords, searchText],
   );
 
-  const taken = useMemo(() => filteredRecords.filter(r => r.status === 'taken').sort((a, b) => dayjs(a.scheduledTime).valueOf() - dayjs(b.scheduledTime).valueOf()), [filteredRecords]);
-  const scheduled = useMemo(() => filteredRecords.filter(r => r.status === 'scheduled').sort((a, b) => dayjs(a.scheduledTime).valueOf() - dayjs(b.scheduledTime).valueOf()), [filteredRecords]);
-  const missed = useMemo(() => filteredRecords.filter(r => r.status === 'missed' || r.status === 'refused').sort((a, b) => dayjs(a.scheduledTime).valueOf() - dayjs(b.scheduledTime).valueOf()), [filteredRecords]);
+  const taken = useMemo(
+    () => filteredRecords.filter(r => r.status === 'taken').sort((a, b) => dayjs(a.scheduledTime).valueOf() - dayjs(b.scheduledTime).valueOf()),
+    [filteredRecords],
+  );
+  const scheduled = useMemo(
+    () => filteredRecords.filter(r => r.status === 'scheduled').sort((a, b) => dayjs(a.scheduledTime).valueOf() - dayjs(b.scheduledTime).valueOf()),
+    [filteredRecords],
+  );
+  const missed = useMemo(
+    () => filteredRecords.filter(r => r.status === 'missed' || r.status === 'refused').sort((a, b) => dayjs(a.scheduledTime).valueOf() - dayjs(b.scheduledTime).valueOf()),
+    [filteredRecords],
+  );
 
   const todayAllTaken = todayRecords.filter(r => r.status === 'taken').length;
   const todayAllScheduled = todayRecords.filter(r => r.status === 'scheduled').length;
@@ -61,20 +103,16 @@ export default function CaregiverMedication() {
 
   const submitIntervene = () => {
     form.validateFields().then(values => {
-      const actions: string[] = values.actions ?? [];
-      const assisted = actions.includes('协助服药');
-      setRecords(prev => prev.map(r =>
-        r.id === interveneModal!.id
-          ? {
-            ...r,
-            status: assisted ? 'taken' as const : (r.status === 'refused' ? 'refused' as const : 'missed' as const),
-            note: `措施：${actions.join('、')}${values.reason ? '；原因：' + values.reason : ''}${values.note ? '；' + values.note : ''}`,
-            notedBy: '王护工',
-            takenAt: assisted ? new Date().toISOString() : r.takenAt,
-          }
-          : r,
-      ));
-      message.success(actions.includes('上报护士') ? '已上报护士，干预记录已提交' : '干预记录已提交');
+      const measures: string[] = values.actions ?? [];
+      const assisted = measures.includes('协助服药');
+      interveneMissed(interveneModal!.id, {
+        measures,
+        reason: values.reason,
+        note: values.note,
+        operator: userName,
+        assisted,
+      });
+      message.success(measures.includes('上报护士') ? '已上报护士，干预记录已提交' : '干预记录已提交');
       setInterveneModal(null);
     });
   };
@@ -84,11 +122,7 @@ export default function CaregiverMedication() {
       title: '确认服药',
       content: `确认 ${record.elderName} 已服用 ${record.medicationName}？`,
       onOk: () => {
-        setRecords(prev => prev.map(r =>
-          r.id === record.id
-            ? { ...r, status: 'taken' as const, takenAt: new Date().toISOString(), notedBy: '王护工' }
-            : r,
-        ));
+        confirmTaken(record.id, userName);
         message.success('已确认服药');
       },
     });
@@ -103,10 +137,12 @@ export default function CaregiverMedication() {
         className={`rounded-xl ${isAttention ? 'border-2 border-red-300 bg-red-50' : 'shadow-sm'}`}
       >
         <div className="flex items-start justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <MedicineBoxOutlined className={isAttention ? 'text-red-500 text-lg' : (record.status === 'taken' ? 'text-green-500 text-lg' : 'text-blue-500 text-lg')} />
             <span className="font-semibold text-base">{record.elderName}</span>
-            <span className="text-gray-400 text-sm">{roomMap[record.elderId] ?? ''}房间</span>
+            {roomMap[record.elderId] && (
+              <Tag color="purple" className="mr-0">{roomMap[record.elderId]}</Tag>
+            )}
           </div>
           <Tag color={cfg.color}>{cfg.label}</Tag>
         </div>
@@ -116,7 +152,12 @@ export default function CaregiverMedication() {
             <ClockCircleOutlined /> {dayjs(record.scheduledTime).format('HH:mm')}
           </div>
           {record.note && <div className={`text-xs mt-1 ${isAttention ? 'text-red-500' : 'text-gray-500'}`}>{record.note}</div>}
-          {record.notedBy && record.status === 'taken' && <div className="text-gray-400 text-xs mt-1">操作人：{record.notedBy}</div>}
+          {record.notedBy && record.status === 'taken' && (
+            <div className="text-gray-400 text-xs mt-1">
+              操作人：{record.notedBy}
+              {record.takenAt && ` | 服于 ${dayjs(record.takenAt).format('HH:mm')}`}
+            </div>
+          )}
         </div>
         {showAction && record.status === 'scheduled' && (
           <Button type="primary" block className="mt-3" size="large" onClick={() => markTaken(record)}>
@@ -167,7 +208,7 @@ export default function CaregiverMedication() {
         </Col>
       </Row>
 
-      <div className="mb-4">
+      <div className="mb-4 flex gap-2">
         <Input
           size="large"
           placeholder="搜索老人姓名"
@@ -175,7 +216,16 @@ export default function CaregiverMedication() {
           value={searchText}
           onChange={e => setSearchText(e.target.value)}
           allowClear
+          className="flex-1"
         />
+        <Button
+          type="default"
+          size="large"
+          icon={<SwapOutlined />}
+          onClick={() => navigate('/caregiver/handover?tab=medication')}
+        >
+          批量交班
+        </Button>
       </div>
 
       {missed.length > 0 && (
