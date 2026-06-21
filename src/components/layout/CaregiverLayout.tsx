@@ -6,6 +6,7 @@ import {
   UserOutlined,
   LogoutOutlined,
   AlertOutlined,
+  HomeOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore, roleConfig } from '@/stores/authStore';
@@ -21,6 +22,7 @@ interface TabItem {
 }
 
 const tabItems: TabItem[] = [
+  { key: 'home', icon: <HomeOutlined />, label: '首页', path: '/caregiver/home' },
   { key: 'tasks', icon: <FileTextOutlined />, label: '任务', path: '/caregiver/tasks', badge: 5 },
   { key: 'alerts', icon: <AlertOutlined />, label: '告警', path: '/caregiver/alerts', badge: 3 },
   { key: 'medication', icon: <MedicineBoxOutlined />, label: '服药', path: '/caregiver/medication' },
@@ -33,7 +35,7 @@ const CaregiverLayout = () => {
 
   const activeKey = tabItems.find(item => 
     location.pathname.startsWith(item.path)
-  )?.key || 'tasks';
+  )?.key || 'home';
 
   const handleTabClick = (key: string) => {
     const tabItem = tabItems.find(item => item.key === key);

@@ -132,19 +132,62 @@ export default function AlertCenter() {
       message.warning('当前筛选结果为空，无可导出数据');
       return;
     }
-    const header = ['告警编号', '级别', '类型', '老人姓名', '位置', '触发时间', '状态', '描述', '负责人'];
+
+    const exportTime = dayjs().format('YYYY-MM-DD HH:mm:ss');
+    const exporter = '张院长';
+
+    const filterConditions: string[] = [];
+    if (filterLevel !== undefined) {
+      filterConditions.push(`级别=${LEVEL_CONFIG[filterLevel]?.text || `${filterLevel}级`}`);
+    }
+    if (filterType) {
+      filterConditions.push(`类型=${TYPE_MAP[filterType] || filterType}`);
+    }
+    if (filterStatus) {
+      filterConditions.push(`状态=${STATUS_MAP[filterStatus]?.text || filterStatus}`);
+    }
+    if (dateRange && dateRange[0] && dateRange[1]) {
+      filterConditions.push(`时间范围=${dayjs(dateRange[0]).format('YYYY-MM-DD')} ~ ${dayjs(dateRange[1]).format('YYYY-MM-DD')}`);
+    }
+
+    const headerLines = [
+      '# 智慧养老照护平台 - 预警记录导出',
+      `# 导出时间：${exportTime}`,
+      `# 导出人：${exporter}`,
+    ];
+    if (filterConditions.length > 0) {
+      headerLines.push(`# 筛选条件：${filterConditions.join('; ')}`);
+    }
+    headerLines.push(`# 共导出 ${filteredAlerts.length} 条记录`);
+
+    const header = [
+      '告警编号', '告警级别', '告警类型', '老人ID', '老人姓名',
+      '房间位置', '触发时间', '确认时间', '解决时间',
+      '告警状态', '告警描述', '负责人ID', '负责人', '处置记录数'
+    ];
+
     const rows = filteredAlerts.map(a => [
       a.id,
       LEVEL_CONFIG[a.level]?.text || `${a.level}级`,
       TYPE_MAP[a.type] || a.type,
-      a.elderName,
+      a.elderId,
+      a.elderName || '',
       a.location || '',
       formatDateTime(a.triggeredAt),
+      a.acknowledgedAt ? formatDateTime(a.acknowledgedAt) : '',
+      a.resolvedAt ? formatDateTime(a.resolvedAt) : '',
       STATUS_MAP[a.status]?.text || a.status,
       a.description,
+      a.assignedTo || '',
       a.assignedToName || '',
+      String(a.handlingNotes.length),
     ]);
-    const csvContent = [header, ...rows].map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+
+    const escapeCSV = (cell: string | number) => `"${String(cell).replace(/"/g, '""')}"`;
+    const headerCSV = header.map(escapeCSV).join(',');
+    const rowsCSV = rows.map(r => r.map(escapeCSV).join(',')).join('\n');
+    const csvContent = [...headerLines, headerCSV, rowsCSV].join('\n');
+
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -155,7 +198,7 @@ export default function AlertCenter() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    message.success(`已导出 ${filteredAlerts.length} 条记录`);
+    message.success(`已导出 ${filteredAlerts.length} 条记录（含筛选摘要）`);
   };
 
   const columns = [

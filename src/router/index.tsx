@@ -25,6 +25,7 @@ import FamilyHealth from '@/pages/family/FamilyHealth';
 import FamilyServices from '@/pages/family/FamilyServices';
 import FamilyVisits from '@/pages/family/FamilyVisits';
 import FamilyBills from '@/pages/family/FamilyBills';
+import CaregiverHome from '@/pages/caregiver/CaregiverHome';
 import CaregiverTasks from '@/pages/caregiver/CaregiverTasks';
 import CaregiverAlerts from '@/pages/caregiver/CaregiverAlerts';
 import CaregiverMedication from '@/pages/caregiver/CaregiverMedication';
@@ -99,7 +100,8 @@ const AppRoutes = () => {
       </Route>
 
       <Route path="/caregiver" element={<ProtectedRoute allowedRoles={['caregiver']}><CaregiverLayout /></ProtectedRoute>}>
-        <Route index element={<Navigate to="tasks" replace />} />
+        <Route index element={<Navigate to="home" replace />} />
+        <Route path="home" element={<CaregiverHome />} />
         <Route path="tasks" element={<CaregiverTasks />} />
         <Route path="alerts" element={<CaregiverAlerts />} />
         <Route path="medication" element={<CaregiverMedication />} />

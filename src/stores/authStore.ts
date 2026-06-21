@@ -26,7 +26,7 @@ interface AuthActions {
 export const roleConfig: Record<string, { label: string; homePath: string; icon: string }> = {
   director: { label: '院长', homePath: '/director/dashboard', icon: '👨‍💼' },
   nurse: { label: '护士', homePath: '/director/health', icon: '👩‍⚕️' },
-  caregiver: { label: '护工', homePath: '/caregiver/tasks', icon: '🧑‍🦯' },
+  caregiver: { label: '护工', homePath: '/caregiver/home', icon: '🧑‍🦯' },
   family: { label: '家属', homePath: '/family/home', icon: '👨‍👩‍👧' },
 };
 

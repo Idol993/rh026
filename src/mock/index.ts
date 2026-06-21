@@ -1223,17 +1223,15 @@ export const mockMedicationRecords: MedicationRecord[] = (() => {
           const scheduledTime = new Date(baseDate);
           scheduledTime.setHours(hour, minute, 0, 0);
           
-          if (scheduledTime > now && day === 0) {
-            return;
-          }
-          
           const random = Math.random();
           let status: MedicationRecord['status'];
           let takenAt: string | undefined;
           let notedBy: string | undefined;
           let note: string | undefined;
           
-          if (day === 0 && scheduledTime > addHours(now, -1)) {
+          if (day === 0 && scheduledTime > now) {
+            status = 'scheduled';
+          } else if (day === 0 && scheduledTime > addHours(now, -1)) {
             status = 'scheduled';
           } else if (random < 0.85) {
             status = 'taken';

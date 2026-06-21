@@ -1,84 +1,69 @@
-import { useState, useMemo } from 'react';
-import { Card, Tag, Button, Modal, Form, Select, Input, Collapse, message } from 'antd';
-import { Clock, PlayCircle, CheckCircle, HeartPulse, UtensilsCrossed, Bath, Activity } from 'lucide-react';
-import dayjs from 'dayjs';
+import { useState, useEffect, useMemo } from 'react';
+import { Card, Tag, Button, Modal, Form, Input, Collapse, Row, Col, Statistic, Empty, Select, message, Upload } from 'antd';
+import { ClockCircleOutlined, PlayCircleOutlined, CheckCircleOutlined, UserOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import type { CareService } from '@/types';
 import { mockCareServices, mockElders } from '@/mock';
+import dayjs from 'dayjs';
 
-const roomMap = Object.fromEntries(mockElders.map(e => [e.id, e.roomNumber ?? '']));
-
-const typeIcons: Record<string, React.ReactNode> = {
-  '晨间护理': <HeartPulse size={18} className="text-blue-500" />,
-  '协助进食': <UtensilsCrossed size={18} className="text-orange-500" />,
-  '生命体征测量': <Activity size={18} className="text-red-500" />,
-  '协助洗澡': <Bath size={18} className="text-cyan-500" />,
-  '康复训练': <Activity size={18} className="text-green-500" />,
-};
-
-const statusConfig: Record<string, { color: string; label: string }> = {
-  scheduled: { color: 'blue', label: '待执行' },
-  in_progress: { color: 'orange', label: '进行中' },
-  completed: { color: 'green', label: '已完成' },
-  missed: { color: 'red', label: '已过期' },
-  cancelled: { color: 'default', label: '已取消' },
-};
+const SERVICE_TYPES = ['翻身', '喂食', '洗澡', '理发', '口腔护理', '压疮护理', '康复训练', '心理慰藉', '清洁消毒', '晨间护理', '协助进食', '生命体征测量', '协助如厕', '协助服药', '户外活动'];
+const typeColors: Record<string, string> = { '翻身': 'purple', '喂食': 'orange', '洗澡': 'cyan', '理发': 'magenta', '口腔护理': 'blue', '压疮护理': 'red', '康复训练': 'green', '心理慰藉': 'geekblue', '清洁消毒': 'volcano', '晨间护理': 'gold', '协助进食': 'orange', '生命体征测量': 'red', '协助如厕': 'purple', '协助服药': 'blue', '户外活动': 'lime' };
+const elderStatusOptions = ['良好', '一般', '较差'];
 
 export default function CaregiverTasks() {
   const [services, setServices] = useState<CareService[]>(mockCareServices);
+  const [searchName, setSearchName] = useState('');
+  const [filterType, setFilterType] = useState<string | undefined>(undefined);
   const [completeModal, setCompleteModal] = useState<CareService | null>(null);
   const [form] = Form.useForm();
-  const [timers, setTimers] = useState<Record<string, number>>({});
+  const [, setTimerTick] = useState(0);
+
+  const roomMap = useMemo(() => Object.fromEntries(mockElders.map(e => [e.id, e.roomNumber ?? ''])), []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setTimerTick(t => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const todayStr = dayjs().format('YYYY-MM-DD');
-  const todayServices = useMemo(
-    () => services.filter(s => dayjs(s.scheduledAt).format('YYYY-MM-DD') === todayStr),
-    [services, todayStr],
-  );
+  const filteredServices = useMemo(() => services.filter(s => {
+    const matchDay = dayjs(s.scheduledAt).format('YYYY-MM-DD') === todayStr;
+    const matchName = !searchName || s.elderName.includes(searchName);
+    const matchType = !filterType || s.type === filterType;
+    return matchDay && matchName && matchType;
+  }), [services, searchName, filterType, todayStr]);
 
-  const pending = todayServices.filter(s => s.status === 'scheduled');
-  const inProgress = todayServices.filter(s => s.status === 'in_progress');
-  const completed = todayServices.filter(s => s.status === 'completed');
+  const pending = filteredServices.filter(s => s.status === 'scheduled');
+  const inProgress = filteredServices.filter(s => s.status === 'in_progress');
+  const completed = filteredServices.filter(s => s.status === 'completed');
+
+  const formatElapsed = (startedAt: string | undefined): string => {
+    if (!startedAt) return '00分00秒';
+    const diff = Date.now() - new Date(startedAt).getTime();
+    const mins = Math.floor(diff / 60000), secs = Math.floor((diff % 60000) / 1000);
+    return `${mins.toString().padStart(2, '0')}分${secs.toString().padStart(2, '0')}秒`;
+  };
 
   const startService = (task: CareService) => {
     Modal.confirm({
-      title: '开始服务',
-      content: `确认开始为 ${task.elderName} 提供「${task.type}」服务？`,
-      okText: '确认开始',
-      cancelText: '取消',
+      title: '开始服务', content: `确认开始为 ${task.elderName} 提供「${task.type}」服务？`, okText: '确认开始', cancelText: '取消',
       onOk: () => {
-        setServices(prev => prev.map(s =>
-          s.id === task.id
-            ? { ...s, status: 'in_progress' as const, startedAt: new Date().toISOString() }
-            : s,
-        ));
-        setTimers(prev => ({ ...prev, [task.id]: Date.now() }));
+        setServices(prev => prev.map(s => s.id === task.id ? { ...s, status: 'in_progress' as const, startedAt: new Date().toISOString() } : s));
         message.success('服务已开始，计时中');
-      },
+      }
     });
   };
 
   const openCompleteModal = (task: CareService) => {
-    const elapsed = timers[task.id]
-      ? Math.round((Date.now() - timers[task.id]) / 60000)
-      : (task.duration ?? 30);
-    form.setFieldsValue({ duration: elapsed, elderStatus: '良好', notes: '' });
+    form.setFieldsValue({ elderStatus: '良好', notes: '' });
     setCompleteModal(task);
   };
 
   const submitComplete = () => {
     form.validateFields().then(values => {
-      setServices(prev => prev.map(s =>
-        s.id === completeModal!.id
-          ? {
-            ...s,
-            status: 'completed' as const,
-            completedAt: new Date().toISOString(),
-            duration: values.duration,
-            elderStatus: values.elderStatus,
-            notes: values.notes,
-          }
-          : s,
-      ));
+      const now = new Date().toISOString();
+      const startedAt = completeModal!.startedAt ?? now;
+      const duration = Math.max(1, Math.round((Date.now() - new Date(startedAt).getTime()) / 60000));
+      setServices(prev => prev.map(s => s.id === completeModal!.id ? { ...s, status: 'completed' as const, completedAt: now, duration, elderStatus: values.elderStatus, notes: values.notes } : s));
       message.success('服务记录已提交');
       setCompleteModal(null);
       form.resetFields();
@@ -86,90 +71,96 @@ export default function CaregiverTasks() {
   };
 
   return (
-    <div className="p-4 max-w-lg mx-auto">
-      <div className="flex gap-3 mb-4">
-        {[
-          { label: '待执行', count: pending.length, color: 'bg-blue-50 text-blue-700' },
-          { label: '进行中', count: inProgress.length, color: 'bg-orange-50 text-orange-700' },
-          { label: '已完成', count: completed.length, color: 'bg-green-50 text-green-700' },
-        ].map(s => (
-          <div key={s.label} className={`flex-1 rounded-xl p-3 text-center ${s.color}`}>
-            <div className="text-2xl font-bold">{s.count}</div>
-            <div className="text-sm">{s.label}</div>
-          </div>
-        ))}
+    <div className="p-4 max-w-lg mx-auto space-y-4">
+      <div className="flex gap-2 items-center">
+        <Input prefix={<SearchOutlined />} placeholder="搜索老人姓名" value={searchName} onChange={e => setSearchName(e.target.value)} allowClear className="flex-1" />
+        <Select placeholder="服务类型" value={filterType} onChange={setFilterType} allowClear style={{ minWidth: 110 }} options={SERVICE_TYPES.map(t => ({ value: t, label: t }))} />
       </div>
 
+      <Row gutter={12}>
+        {[{ v: pending.length, c: '#1677ff', t: '待执行' }, { v: inProgress.length, c: '#fa8c16', t: '进行中' }, { v: completed.length, c: '#52c41a', t: '已完成' }].map(s => (
+          <Col span={8} key={s.t}>
+            <Card className="rounded-xl"><Statistic title={<span className="text-xs text-gray-500">{s.t}</span>} value={s.v} valueStyle={{ color: s.c, fontSize: 24 }} /></Card>
+          </Col>
+        ))}
+      </Row>
+
+      {inProgress.length > 0 && (
+        <div className="space-y-3">
+          <div className="font-semibold text-orange-600 flex items-center gap-1"><ClockCircleOutlined /> 正在进行中</div>
+          {inProgress.map(task => (
+            <Card key={task.id} className="rounded-xl border-2 border-orange-300 shadow-md" style={{ background: 'linear-gradient(135deg, #fff7e6 0%, #fff 100%)' }}>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center"><UserOutlined className="text-orange-500 text-lg" /></div>
+                    <div><div className="font-bold text-lg">{task.elderName}</div><div className="text-sm text-gray-500">{roomMap[task.elderId]}房间</div></div>
+                  </div>
+                  <Tag color={typeColors[task.type] ?? 'blue'}>{task.type}</Tag>
+                </div>
+                <div className="text-sm text-gray-600">开始时间：{dayjs(task.startedAt).format('HH:mm')}</div>
+                <div className="text-center py-3 bg-white rounded-lg">
+                  <div className="text-xs text-gray-500">已服务</div>
+                  <div className="text-2xl font-bold text-orange-600 font-mono">{formatElapsed(task.startedAt)}</div>
+                </div>
+                <Button type="primary" size="large" icon={<CheckCircleOutlined />} onClick={() => openCompleteModal(task)} block className="h-12 text-base font-semibold">完成服务</Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
       <div className="space-y-3">
-        {[...inProgress, ...pending].map(task => (
+        <div className="font-semibold text-blue-600 flex items-center gap-1"><PlayCircleOutlined /> 待执行任务</div>
+        {pending.length === 0 ? <Empty description="暂无待执行任务" /> : pending.map(task => (
           <Card key={task.id} size="small" className="rounded-xl shadow-sm">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-2">
-                {typeIcons[task.type] ?? <Clock size={18} className="text-gray-500" />}
-                <span className="font-semibold text-base">{task.elderName}</span>
-                <span className="text-gray-400 text-sm">{roomMap[task.elderId]}房间</span>
+                <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center"><UserOutlined className="text-blue-500" /></div>
+                <div className="font-semibold">{task.elderName}<span className="text-gray-400 text-sm ml-1">{roomMap[task.elderId]}房间</span></div>
               </div>
-              <Tag color={statusConfig[task.status].color}>{statusConfig[task.status].label}</Tag>
+              <Tag color="blue" className="m-0">待执行</Tag>
             </div>
-            <div className="mt-2 text-gray-600">
-              <div className="text-sm">服务类型：{task.type}</div>
-              <div className="text-sm flex items-center gap-1">
-                <Clock size={14} /> 计划时间：{dayjs(task.scheduledAt).format('HH:mm')}
-              </div>
+            <div className="mt-2 flex items-center justify-between">
+              <Tag color={typeColors[task.type] ?? 'default'}>{task.type}</Tag>
+              <div className="text-sm text-gray-500 flex items-center gap-1"><ClockCircleOutlined /> {dayjs(task.scheduledAt).format('HH:mm')}</div>
             </div>
-            <div className="mt-3 flex gap-2">
-              {task.status === 'scheduled' && (
-                <Button type="primary" icon={<PlayCircle size={16} />} onClick={() => startService(task)} block>
-                  开始服务
-                </Button>
-              )}
-              {task.status === 'in_progress' && (
-                <Button type="primary" icon={<CheckCircle size={16} />} onClick={() => openCompleteModal(task)} block>
-                  完成服务
-                </Button>
-              )}
-            </div>
+            <div className="mt-3"><Button type="primary" icon={<PlayCircleOutlined />} onClick={() => startService(task)} block>开始服务</Button></div>
           </Card>
         ))}
       </div>
 
-      {completed.length > 0 && (
-        <Collapse className="mt-4 rounded-xl" items={[{
-          key: '1',
-          label: `已完成任务 (${completed.length})`,
-          children: completed.map(task => (
-            <div key={task.id} className="py-2 border-b last:border-0">
-              <div className="flex justify-between items-center">
-                <span>{task.elderName} - {task.type}</span>
-                <Tag color="green">{task.duration}分钟</Tag>
-              </div>
-              <div className="text-xs text-gray-400">{dayjs(task.completedAt).format('HH:mm')} 完成</div>
+      <Collapse className="rounded-xl" defaultActiveKey={[]} items={[{
+        key: 'completed', label: <span className="font-semibold text-green-600">已完成任务 ({completed.length})</span>,
+        children: completed.length === 0 ? <Empty description="暂无已完成任务" /> : <div className="space-y-3">{completed.map(task => (
+          <Card key={task.id} size="small" className="rounded-xl">
+            <div className="flex items-start justify-between"><div className="font-semibold">{task.elderName}</div><Tag color="green">{task.duration}分钟</Tag></div>
+            <div className="mt-1 space-y-1 text-sm text-gray-600">
+              <div className="flex justify-between"><span>服务类型</span><Tag color={typeColors[task.type] ?? 'default'}>{task.type}</Tag></div>
+              <div className="flex justify-between"><span>完成时间</span><span>{dayjs(task.completedAt).format('HH:mm')}</span></div>
+              <div className="flex justify-between"><span>老人状态</span><span>{task.elderStatus ?? '—'}</span></div>
+              {task.notes && <div><div className="text-gray-500 mb-1">备注</div><div className="bg-gray-50 p-2 rounded">{task.notes}</div></div>}
+              {task.rating && <div className="flex justify-between"><span>评分</span><span className="text-orange-500">{'★'.repeat(task.rating)}</span></div>}
+              {task.feedback && <div><div className="text-gray-500 mb-1">家属反馈</div><div className="bg-blue-50 p-2 rounded">{task.feedback}</div></div>}
             </div>
-          )),
-        }]} />
-      )}
+          </Card>
+        ))}</div>
+      }]} />
 
-      <Modal
-        title="服务记录"
-        open={!!completeModal}
-        onOk={submitComplete}
-        onCancel={() => { setCompleteModal(null); form.resetFields(); }}
-        okText="提交记录"
-      >
+      <Modal title="完成服务记录" open={!!completeModal} onOk={submitComplete} onCancel={() => { setCompleteModal(null); form.resetFields(); }} okText="提交记录" okButtonProps={{ className: 'h-10 px-6' }} width="90%" style={{ maxWidth: 420 }}>
+        {completeModal && <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm">
+          <div className="font-semibold">{completeModal.elderName} - {completeModal.type}</div>
+          <div className="text-gray-500 mt-1">已服务 {formatElapsed(completeModal.startedAt)}</div>
+        </div>}
         <Form form={form} layout="vertical">
-          <Form.Item label="服务时长（分钟）" name="duration" rules={[{ required: true }]}>
-            <Input type="number" suffix="分钟" />
+          <Form.Item label="老人状态" name="elderStatus" rules={[{ required: true, message: '请选择老人状态' }]}>
+            <Select options={elderStatusOptions.map(v => ({ value: v, label: v }))} />
           </Form.Item>
-          <Form.Item label="老人状态" name="elderStatus" rules={[{ required: true }]}>
-            <Select options={['良好', '一般', '不适', '需关注'].map(v => ({ value: v, label: v }))} />
-          </Form.Item>
-          <Form.Item label="异常备注" name="notes">
-            <Input.TextArea rows={2} placeholder="请记录异常情况（如有）" />
-          </Form.Item>
+          <Form.Item label="异常备注" name="notes"><Input.TextArea rows={3} placeholder="请记录异常情况（如有）" /></Form.Item>
           <Form.Item label="照片上传">
-            <div className="w-24 h-24 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-400 text-sm">
-              + 上传
-            </div>
+            <Upload listType="picture-card" maxCount={3} beforeUpload={() => { message.info('模拟上传成功'); return false; }}>
+              <div className="flex flex-col items-center justify-center py-2"><UploadOutlined className="text-xl" /><div className="text-xs text-gray-500 mt-1">上传照片</div></div>
+            </Upload>
           </Form.Item>
         </Form>
       </Modal>
