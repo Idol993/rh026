@@ -206,6 +206,8 @@ export interface HandoverItem {
   elderName: string;
   detail: string;
   status: string;
+  closedAt?: string;
+  closedBy?: string;
 }
 
 export interface HandoverRecord {

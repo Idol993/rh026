@@ -56,6 +56,9 @@ export const useCareServiceStore = create<ServiceState & ServiceActions>()(
               : s
           ),
         });
+        import('@/stores/alertStore').then(({ useAlertStore }) => {
+          useAlertStore.getState().closeHandoverItem('*', id, '王护工');
+        });
       },
 
       updateService: (id, patch) => {

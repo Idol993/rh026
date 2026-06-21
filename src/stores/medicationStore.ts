@@ -51,6 +51,9 @@ export const useMedicationStore = create<MedState & MedActions>()(
               : r
           ),
         });
+        import('@/stores/alertStore').then(({ useAlertStore }) => {
+          useAlertStore.getState().closeHandoverItem('*', id, operator);
+        });
       },
 
       interveneMissed: (id, { measures, reason, note, operator = '王护工', assisted }) => {
@@ -71,6 +74,11 @@ export const useMedicationStore = create<MedState & MedActions>()(
             };
           }),
         });
+        if (assisted) {
+          import('@/stores/alertStore').then(({ useAlertStore }) => {
+            useAlertStore.getState().closeHandoverItem('*', id, operator);
+          });
+        }
       },
 
       updateRecord: (id, patch) => {

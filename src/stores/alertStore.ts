@@ -47,8 +47,11 @@ interface AlertActions {
   acknowledge: (id: string, userName: string, userId: string) => void;
   resolve: (id: string, note: string, userName: string, userId: string) => void;
   markHandover: (payload: HandoverPayload, fromId: string, fromName: string) => HandoverRecord;
+  closeHandoverItem: (handoverId: string, itemRefId: string, closedBy: string) => void;
   getTodayAlerts: () => Alert[];
   getLatestHandoverForToday: () => HandoverRecord | null;
+  getHandovers: (filter?: { period?: 'today' | 'week' | 'all'; closed?: boolean }) => HandoverRecord[];
+  getHandoverById: (id: string) => HandoverRecord | null;
 }
 
 export const useAlertStore = create<AlertState & AlertActions>()(
@@ -89,9 +92,14 @@ export const useAlertStore = create<AlertState & AlertActions>()(
               acknowledgedAt: stepIndex === 0 ? now : a.acknowledgedAt,
               resolvedAt: stepIndex === 3 ? now : a.resolvedAt,
               handlingNotes: [...a.handlingNotes, newNote],
+              assignedTo: userId,
+              assignedToName: userName,
             };
           }),
         });
+        if (stepIndex === 3) {
+          get().closeHandoverItem('*', alertId, userName);
+        }
       },
 
       addNote: (alertId, note) => {
@@ -138,6 +146,7 @@ export const useAlertStore = create<AlertState & AlertActions>()(
               : a
           ),
         });
+        get().closeHandoverItem('*', id, userName);
       },
 
       markHandover: ({ toCaregiverId, toCaregiverName, shiftNote, items }, fromId, fromName) => {
@@ -151,7 +160,6 @@ export const useAlertStore = create<AlertState & AlertActions>()(
           shiftNote,
           items,
         };
-        // 给告警/服务/服药同步补交接标签（简化：把交接写入各自的 note 中，以便详情页看到）
         const serviceIds = items.filter(i => i.type === 'service').map(i => i.refId);
         const medIds = items.filter(i => i.type === 'medication').map(i => i.refId);
         const alertIds = items.filter(i => i.type === 'alert').map(i => i.refId);
@@ -189,6 +197,23 @@ export const useAlertStore = create<AlertState & AlertActions>()(
         return record;
       },
 
+      closeHandoverItem: (handoverId, itemRefId, closedBy) => {
+        const now = new Date().toISOString();
+        set({
+          handovers: get().handovers.map(h => {
+            if (handoverId !== '*' && h.id !== handoverId) return h;
+            const hasItem = h.items.some(i => i.refId === itemRefId);
+            if (!hasItem) return h;
+            return {
+              ...h,
+              items: h.items.map(i =>
+                i.refId === itemRefId ? { ...i, closedAt: now, closedBy } : i
+              ),
+            };
+          }),
+        });
+      },
+
       getTodayAlerts: () => {
         const today = dayjs().format('YYYY-MM-DD');
         return get().alerts.filter(a => dayjs(a.triggeredAt).format('YYYY-MM-DD') === today);
@@ -199,6 +224,27 @@ export const useAlertStore = create<AlertState & AlertActions>()(
         const todays = get().handovers.filter(h => dayjs(h.createdAt).format('YYYY-MM-DD') === today);
         return todays[0] || null;
       },
+
+      getHandovers: (filter) => {
+        let result = [...get().handovers];
+        if (filter?.period === 'today') {
+          const today = dayjs().format('YYYY-MM-DD');
+          result = result.filter(h => dayjs(h.createdAt).format('YYYY-MM-DD') === today);
+        } else if (filter?.period === 'week') {
+          const weekAgo = dayjs().subtract(7, 'day');
+          result = result.filter(h => dayjs(h.createdAt).isAfter(weekAgo));
+        }
+        if (filter?.closed === false) {
+          result = result.filter(h => h.items.some(i => !i.closedAt));
+        } else if (filter?.closed === true) {
+          result = result.filter(h => h.items.every(i => i.closedAt));
+        }
+        return result;
+      },
+
+      getHandoverById: (id) => {
+        return get().handovers.find(h => h.id === id) || null;
+      },
     }),
     {
       name: 'alert-storage',
@@ -207,7 +253,6 @@ export const useAlertStore = create<AlertState & AlertActions>()(
   )
 );
 
-// 导出常量，便于消费方统一展示
 export const ALERT_TYPE_MAP = TYPE_MAP;
 export const ALERT_STATUS_MAP = STATUS_MAP;
 export const CARE_SERVICE_STATUS_MAP = SERVICE_STATUS_MAP;

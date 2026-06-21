@@ -23,7 +23,7 @@ const elderStatusOptions = ['良好', '一般', '需送医', '已送医'].map(v 
 export default function CaregiverAlerts() {
   const initIfNeeded = useAlertStore(s => s.initIfNeeded);
   const processStep = useAlertStore(s => s.processStep);
-  const getTodayAlerts = useAlertStore(s => s.getTodayAlerts);
+  const alerts = useAlertStore(s => s.alerts);
   const user = useAuthStore(s => s.user);
   const navigate = useNavigate();
 
@@ -36,7 +36,10 @@ export default function CaregiverAlerts() {
 
   useEffect(() => { initIfNeeded(); }, [initIfNeeded]);
 
-  const todayAlerts = useMemo(() => getTodayAlerts(), [getTodayAlerts]);
+  const todayAlerts = useMemo(() => {
+    const today = dayjs().format('YYYY-MM-DD');
+    return alerts.filter(a => dayjs(a.triggeredAt).format('YYYY-MM-DD') === today);
+  }, [alerts]);
   const pendingList = useMemo(() => todayAlerts
     .filter(a => ['pending', 'acknowledged', 'processing'].includes(a.status))
     .sort((a, b) => b.level - a.level), [todayAlerts]);
