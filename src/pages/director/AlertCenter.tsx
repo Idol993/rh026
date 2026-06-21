@@ -4,13 +4,14 @@ import { ExclamationCircleOutlined, CheckCircleOutlined, ClockCircleOutlined, Ex
 import type { Alert, AlertNote } from '@/types';
 import { mockAlerts } from '@/mock';
 import { formatDateTime } from '@/utils/date';
+import dayjs, { Dayjs } from 'dayjs';
 
 const { RangePicker } = DatePicker;
 
-const LEVEL_CONFIG: Record<number, { color: string; text: string }> = {
-  1: { color: 'red', text: '1级-紧急' },
-  2: { color: 'orange', text: '2级-重要' },
-  3: { color: 'gold', text: '3级-一般' },
+const LEVEL_CONFIG: Record<number, { color: string; text: string; priority: number }> = {
+  3: { color: 'red', text: '3级-紧急', priority: 3 },
+  2: { color: 'orange', text: '2级-重要', priority: 2 },
+  1: { color: 'gold', text: '1级-一般', priority: 1 },
 };
 
 const TYPE_MAP: Record<string, string> = {
@@ -34,6 +35,7 @@ export default function AlertCenter() {
   const [filterLevel, setFilterLevel] = useState<number | undefined>();
   const [filterType, setFilterType] = useState<string | undefined>();
   const [filterStatus, setFilterStatus] = useState<string | undefined>();
+  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const [handleModalOpen, setHandleModalOpen] = useState(false);
   const [currentAlert, setCurrentAlert] = useState<Alert | null>(null);
   const [handleStep, setHandleStep] = useState(0);
@@ -41,12 +43,11 @@ export default function AlertCenter() {
   const [handlePhotos, setHandlePhotos] = useState<string[]>([]);
 
   const stats = useMemo(() => {
-    const pending = alerts.filter(a => a.status === 'pending').length;
-    const processing = alerts.filter(a => a.status === 'acknowledged' || a.status === 'processing').length;
-    const todayResolved = alerts.filter(a => {
-      if (a.status !== 'resolved' && a.status !== 'closed') return false;
-      return a.resolvedAt ? new Date(a.resolvedAt).toDateString() === new Date().toDateString() : false;
-    }).length;
+    const today = dayjs().format('YYYY-MM-DD');
+    const todayAlerts = alerts.filter(a => dayjs(a.triggeredAt).format('YYYY-MM-DD') === today);
+    const pending = todayAlerts.filter(a => a.status === 'pending').length;
+    const processing = todayAlerts.filter(a => a.status === 'acknowledged' || a.status === 'processing').length;
+    const todayResolved = todayAlerts.filter(a => a.status === 'resolved' || a.status === 'closed').length;
     const totalHandled = alerts.filter(a => a.status === 'resolved' || a.status === 'closed').length;
     const totalAlerts = alerts.length;
     const rate = totalAlerts > 0 ? Math.round((totalHandled / totalAlerts) * 100) : 0;
@@ -58,13 +59,28 @@ export default function AlertCenter() {
     if (filterLevel !== undefined) result = result.filter(a => a.level === filterLevel);
     if (filterType) result = result.filter(a => a.type === filterType);
     if (filterStatus) result = result.filter(a => a.status === filterStatus);
+    if (dateRange && dateRange[0] && dateRange[1]) {
+      const start = dayjs(dateRange[0]).startOf('day').valueOf();
+      const end = dayjs(dateRange[1]).endOf('day').valueOf();
+      result = result.filter(a => {
+        const t = new Date(a.triggeredAt).getTime();
+        return t >= start && t <= end;
+      });
+    }
+    const statusOrder: Record<string, number> = { pending: 0, processing: 1, acknowledged: 2, resolved: 3, closed: 4 };
     result.sort((a, b) => {
-      if (a.status === 'pending' && b.status !== 'pending') return -1;
-      if (b.status === 'pending' && a.status !== 'pending') return 1;
+      if ((a.status === 'pending') !== (b.status === 'pending')) {
+        return a.status === 'pending' ? -1 : 1;
+      }
+      if ((LEVEL_CONFIG[a.level]?.priority ?? 0) !== (LEVEL_CONFIG[b.level]?.priority ?? 0)) {
+        return (LEVEL_CONFIG[b.level]?.priority ?? 0) - (LEVEL_CONFIG[a.level]?.priority ?? 0);
+      }
+      const statusDiff = (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9);
+      if (statusDiff !== 0) return statusDiff;
       return new Date(b.triggeredAt).getTime() - new Date(a.triggeredAt).getTime();
     });
     return result;
-  }, [alerts, filterLevel, filterType, filterStatus]);
+  }, [alerts, filterLevel, filterType, filterStatus, dateRange]);
 
   const openHandleModal = (alert: Alert) => {
     setCurrentAlert(alert);
@@ -111,11 +127,43 @@ export default function AlertCenter() {
     }
   };
 
+  const exportCSV = () => {
+    if (filteredAlerts.length === 0) {
+      message.warning('当前筛选结果为空，无可导出数据');
+      return;
+    }
+    const header = ['告警编号', '级别', '类型', '老人姓名', '位置', '触发时间', '状态', '描述', '负责人'];
+    const rows = filteredAlerts.map(a => [
+      a.id,
+      LEVEL_CONFIG[a.level]?.text || `${a.level}级`,
+      TYPE_MAP[a.type] || a.type,
+      a.elderName,
+      a.location || '',
+      formatDateTime(a.triggeredAt),
+      STATUS_MAP[a.status]?.text || a.status,
+      a.description,
+      a.assignedToName || '',
+    ]);
+    const csvContent = [header, ...rows].map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const ts = dayjs().format('YYYYMMDD_HHmmss');
+    link.download = `预警记录_${ts}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    message.success(`已导出 ${filteredAlerts.length} 条记录`);
+  };
+
   const columns = [
     {
       title: '告警级别',
       dataIndex: 'level',
       width: 100,
+      sorter: (a: Alert, b: Alert) => (LEVEL_CONFIG[a.level]?.priority ?? 0) - (LEVEL_CONFIG[b.level]?.priority ?? 0),
       render: (level: number) => (
         <Tag color={LEVEL_CONFIG[level]?.color} style={{ fontWeight: 600 }}>
           {LEVEL_CONFIG[level]?.text}
@@ -125,7 +173,7 @@ export default function AlertCenter() {
     {
       title: '类型',
       dataIndex: 'type',
-      width: 100,
+      width: 110,
       render: (type: string) => TYPE_MAP[type] || type,
     },
     {
@@ -143,6 +191,7 @@ export default function AlertCenter() {
       title: '触发时间',
       dataIndex: 'triggeredAt',
       width: 160,
+      sorter: (a: Alert, b: Alert) => new Date(a.triggeredAt).getTime() - new Date(b.triggeredAt).getTime(),
       render: (v: string) => formatDateTime(v),
     },
     {
@@ -187,14 +236,14 @@ export default function AlertCenter() {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold m-0">预警中心</h2>
-        <Button icon={<ExportOutlined />} onClick={() => message.success('导出功能开发中')}>导出</Button>
+        <Button icon={<ExportOutlined />} type="primary" onClick={exportCSV}>导出</Button>
       </div>
 
       <Row gutter={[12, 12]}>
         <Col xs={12} sm={6}>
           <Card size="small">
             <Statistic
-              title="待处理"
+              title="今日待处理"
               value={stats.pending}
               valueStyle={{ color: '#f5222d' }}
               prefix={<ExclamationCircleOutlined />}
@@ -204,7 +253,7 @@ export default function AlertCenter() {
         <Col xs={12} sm={6}>
           <Card size="small">
             <Statistic
-              title="处理中"
+              title="今日处理中"
               value={stats.processing}
               valueStyle={{ color: '#fa8c16' }}
               prefix={<ClockCircleOutlined />}
@@ -238,9 +287,9 @@ export default function AlertCenter() {
               value={filterLevel}
               onChange={setFilterLevel}
               options={[
-                { value: 1, label: '1级-紧急' },
+                { value: 3, label: '3级-紧急' },
                 { value: 2, label: '2级-重要' },
-                { value: 3, label: '3级-一般' },
+                { value: 1, label: '1级-一般' },
               ]}
             />
           </Col>
@@ -265,7 +314,12 @@ export default function AlertCenter() {
             />
           </Col>
           <Col xs={12} sm={6} md={9}>
-            <RangePicker style={{ width: '100%' }} />
+            <RangePicker
+              style={{ width: '100%' }}
+              value={dateRange as any}
+              onChange={(v) => setDateRange(v as any)}
+              allowClear
+            />
           </Col>
         </Row>
 

@@ -13,7 +13,11 @@ import type {
   Medication,
 } from '../types';
 
-const now = new Date('2026-06-21T10:30:00');
+const now = (() => {
+  const d = new Date();
+  d.setHours(10, 30, 0, 0);
+  return d;
+})();
 const formatDate = (date: Date): string => date.toISOString();
 
 const addDays = (date: Date, days: number): Date => {
@@ -818,7 +822,7 @@ export const mockAlerts: Alert[] = [
     elderId: 'elder2',
     elderName: '王德明',
     type: 'inactivity',
-    level: 1,
+    level: 2,
     status: 'resolved',
     triggeredAt: formatDate(addHours(now, -36)),
     acknowledgedAt: formatDate(addHours(now, -35.8)),
@@ -851,7 +855,7 @@ export const mockAlerts: Alert[] = [
     elderId: 'elder4',
     elderName: '张富贵',
     type: 'out_of_bed',
-    level: 3,
+    level: 2,
     status: 'processing',
     triggeredAt: formatDate(addHours(now, -2)),
     acknowledgedAt: formatDate(addHours(now, -1.9)),

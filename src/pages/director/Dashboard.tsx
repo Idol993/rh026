@@ -29,7 +29,8 @@ const ALERT_TYPE_LABEL: Record<string, string> = {
   respiration: '呼吸异常', sos: '紧急呼叫', medication_miss: '漏服药物', door: '门磁', smoke: '烟雾', gas: '燃气',
 };
 
-const LEVEL_COLOR: Record<number, string> = { 1: '#FF9800', 2: '#FF9800', 3: '#F44336' };
+const LEVEL_COLOR: Record<number, string> = { 3: '#F44336', 2: '#FF9800', 1: '#FADB14' };
+const LEVEL_TEXT: Record<number, string> = { 3: '紧急', 2: '重要', 1: '一般' };
 const STATUS_TAG: Record<string, { color: string; text: string }> = {
   pending: { color: 'red', text: '待处理' },
   acknowledged: { color: 'orange', text: '已确认' },
@@ -82,8 +83,33 @@ export default function Dashboard() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const todayStr = new Date().toDateString();
+  const todayAllAlertsCount = mockAlerts.filter(a =>
+    new Date(a.triggeredAt).toDateString() === todayStr
+  ).length;
+
+  const todayServices = mockCareServices.filter(s => {
+    const d = new Date(s.scheduledAt).toDateString();
+    return d === new Date().toDateString();
+  });
+  const completedCount = todayServices.filter(s => s.status === 'completed').length;
+  const totalToday = todayServices.length || 1;
+  const overdueCount = todayServices.filter(s => s.status === 'missed').length;
+  const serviceRate = todayServices.length > 0 ? Math.round((completedCount / totalToday) * 100) : 0;
+
+  const DYNAMIC_STATS = STATS.map((item, idx) => {
+    if (idx === 1) return { ...item, value: todayAllAlertsCount };
+    if (idx === 2) return { ...item, value: serviceRate };
+    return item;
+  });
+
   useEffect(() => {
-    const sorted = [...mockAlerts].sort((a, b) => new Date(b.triggeredAt).getTime() - new Date(a.triggeredAt).getTime());
+    const sorted = [...mockAlerts]
+      .sort((a, b) => {
+        const levelDiff = b.level - a.level;
+        if (levelDiff !== 0) return levelDiff;
+        return new Date(b.triggeredAt).getTime() - new Date(a.triggeredAt).getTime();
+      });
     setAlerts(sorted.slice(0, 8));
   }, []);
 
@@ -101,18 +127,10 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, []);
 
-  const todayServices = mockCareServices.filter(s => {
-    const d = new Date(s.scheduledAt).toDateString();
-    return d === new Date().toDateString();
-  });
-  const completedCount = todayServices.filter(s => s.status === 'completed').length;
-  const totalToday = todayServices.length || 1;
-  const overdueCount = todayServices.filter(s => s.status === 'missed').length;
-
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        {STATS.map(item => (
+        {DYNAMIC_STATS.map(item => (
           <Card key={item.title} className="rounded-xl shadow-sm hover:shadow-md transition-shadow" bodyStyle={{ padding: '20px' }}>
             <div className="flex items-center justify-between">
               <div>
@@ -158,7 +176,7 @@ export default function Dashboard() {
               columns={[
                 {
                   title: '级别', dataIndex: 'level', width: 60,
-                  render: (v: number) => <Tag color={LEVEL_COLOR[v]}>{v}级</Tag>,
+                  render: (v: number) => <Tag color={LEVEL_COLOR[v]}>{LEVEL_TEXT[v]}</Tag>,
                 },
                 {
                   title: '类型', dataIndex: 'type', width: 80, ellipsis: true,

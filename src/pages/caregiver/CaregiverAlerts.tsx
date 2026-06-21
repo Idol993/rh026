@@ -31,10 +31,13 @@ export default function CaregiverAlerts() {
   const [handleModal, setHandleModal] = useState<Alert | null>(null);
   const [form] = Form.useForm();
 
-  const pending = alerts
+  const todayStr = dayjs().format('YYYY-MM-DD');
+  const todayAlerts = alerts.filter(a => dayjs(a.triggeredAt).format('YYYY-MM-DD') === todayStr);
+
+  const pending = todayAlerts
     .filter(a => a.status === 'pending' || a.status === 'acknowledged' || a.status === 'processing')
     .sort((a, b) => b.level - a.level);
-  const resolved = alerts.filter(a => a.status === 'resolved' || a.status === 'closed');
+  const resolved = todayAlerts.filter(a => a.status === 'resolved' || a.status === 'closed');
 
   const openHandleModal = (alert: Alert) => {
     form.resetFields();

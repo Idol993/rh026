@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Card, Table, Tag, Button, Select, DatePicker, Modal, Descriptions, Rate,
-  Form, Input, Space, Row, Col, Statistic,
+  Form, Input, Space, Row, Col, Statistic, message,
 } from 'antd';
 import {
   PlusOutlined, FileTextOutlined, CheckCircleOutlined,
@@ -10,6 +10,7 @@ import {
 import type { CareService } from '@/types';
 import { mockCareServices } from '@/mock';
 import { formatDateTime } from '@/utils/date';
+import dayjs, { Dayjs } from 'dayjs';
 
 const statusConfig: Record<CareService['status'], { color: string; text: string }> = {
   scheduled: { color: 'blue', text: '待执行' },
@@ -26,28 +27,78 @@ const serviceTypeOptions = [
 ];
 
 const caregiverOptions = [
-  { label: '王护工', value: '王护工' },
-  { label: '赵护工', value: '赵护工' },
-  { label: '钱护工', value: '钱护工' },
+  { label: '王护工', value: '王护工', id: 'user3' },
+  { label: '赵护工', value: '赵护工', id: 'user5' },
+  { label: '钱护工', value: '钱护工', id: 'user6' },
 ];
 
+interface CreateFormValues {
+  elderName: string;
+  type: string;
+  caregiverName: string;
+  scheduledAt: Dayjs;
+  notes?: string;
+}
+
 export default function CareServices() {
+  const [services, setServices] = useState<CareService[]>(mockCareServices);
   const [detailVisible, setDetailVisible] = useState(false);
   const [createVisible, setCreateVisible] = useState(false);
   const [currentRecord, setCurrentRecord] = useState<CareService | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [typeFilter, setTypeFilter] = useState<string | undefined>();
   const [caregiverFilter, setCaregiverFilter] = useState<string | undefined>();
+  const [dateFilter, setDateFilter] = useState<Dayjs | null>(null);
+  const [createForm] = Form.useForm<CreateFormValues>();
 
-  const filteredData = mockCareServices.filter((item) => {
-    if (statusFilter && item.status !== statusFilter) return false;
-    if (typeFilter && item.type !== typeFilter) return false;
-    if (caregiverFilter && item.caregiverName !== caregiverFilter) return false;
-    return true;
-  });
+  const today = dayjs().format('YYYY-MM-DD');
+  const stats = useMemo(() => {
+    const todayServices = services.filter(s => dayjs(s.scheduledAt).format('YYYY-MM-DD') === today);
+    return {
+      total: todayServices.length,
+      completed: todayServices.filter(s => s.status === 'completed').length,
+      inProgress: todayServices.filter(s => s.status === 'in_progress').length,
+      missed: todayServices.filter(s => s.status === 'missed').length,
+    };
+  }, [services, today]);
+
+  const filteredData = useMemo(() => {
+    return services.filter((item) => {
+      if (statusFilter && item.status !== statusFilter) return false;
+      if (typeFilter && item.type !== typeFilter) return false;
+      if (caregiverFilter && item.caregiverName !== caregiverFilter) return false;
+      if (dateFilter) {
+        if (dayjs(item.scheduledAt).format('YYYY-MM-DD') !== dateFilter.format('YYYY-MM-DD')) return false;
+      }
+      return true;
+    });
+  }, [services, statusFilter, typeFilter, caregiverFilter, dateFilter]);
+
+  const handleCreate = () => {
+    createForm.validateFields().then(values => {
+      const caregiver = caregiverOptions.find(c => c.value === values.caregiverName);
+      const newService: CareService = {
+        id: `svc-new-${Date.now()}`,
+        elderId: `elder-new-${Date.now()}`,
+        elderName: values.elderName,
+        type: values.type,
+        scheduledAt: values.scheduledAt.toISOString(),
+        caregiverId: caregiver?.id || 'user3',
+        caregiverName: values.caregiverName,
+        status: 'scheduled',
+        notes: values.notes,
+      };
+      setServices(prev => [newService, ...prev]);
+      message.success('工单已创建');
+      setCreateVisible(false);
+      createForm.resetFields();
+      setCurrentRecord(newService);
+      setDetailVisible(true);
+    });
+  };
 
   const columns = [
-    { title: '工单编号', dataIndex: 'id', key: 'id', width: 110 },
+    { title: '工单编号', dataIndex: 'id', key: 'id', width: 140 },
     { title: '老人姓名', dataIndex: 'elderName', key: 'elderName', width: 90 },
     { title: '服务类型', dataIndex: 'type', key: 'type', width: 110 },
     { title: '护工', dataIndex: 'caregiverName', key: 'caregiverName', width: 80 },
@@ -80,22 +131,22 @@ export default function CareServices() {
       <Row gutter={16}>
         <Col span={6}>
           <Card hoverable>
-            <Statistic title="今日工单总数" value={28} prefix={<FileTextOutlined />} />
+            <Statistic title="今日工单总数" value={stats.total} prefix={<FileTextOutlined />} />
           </Card>
         </Col>
         <Col span={6}>
           <Card hoverable>
-            <Statistic title="已完成" value={22} valueStyle={{ color: '#8c8c8c' }} prefix={<CheckCircleOutlined />} />
+            <Statistic title="已完成" value={stats.completed} valueStyle={{ color: '#8c8c8c' }} prefix={<CheckCircleOutlined />} />
           </Card>
         </Col>
         <Col span={6}>
           <Card hoverable>
-            <Statistic title="进行中" value={4} valueStyle={{ color: '#52c41a' }} prefix={<SyncOutlined />} />
+            <Statistic title="进行中" value={stats.inProgress} valueStyle={{ color: '#52c41a' }} prefix={<SyncOutlined />} />
           </Card>
         </Col>
         <Col span={6}>
           <Card hoverable>
-            <Statistic title="超时" value={2} valueStyle={{ color: '#f5222d' }} prefix={<ClockCircleOutlined />} />
+            <Statistic title="超时" value={stats.missed} valueStyle={{ color: '#f5222d' }} prefix={<ClockCircleOutlined />} />
           </Card>
         </Col>
       </Row>
@@ -103,7 +154,12 @@ export default function CareServices() {
       <Card>
         <div className="flex items-center justify-between mb-4">
           <Space wrap>
-            <DatePicker placeholder="选择日期" />
+            <DatePicker
+              placeholder="选择日期"
+              value={dateFilter}
+              onChange={(v) => setDateFilter(v)}
+              allowClear
+            />
             <Select
               placeholder="服务类型" allowClear style={{ width: 140 }}
               value={typeFilter} onChange={setTypeFilter}
@@ -112,7 +168,7 @@ export default function CareServices() {
             <Select
               placeholder="护工" allowClear style={{ width: 120 }}
               value={caregiverFilter} onChange={setCaregiverFilter}
-              options={caregiverOptions}
+              options={caregiverOptions.map(c => ({ label: c.label, value: c.value }))}
             />
             <Select
               placeholder="状态" allowClear style={{ width: 120 }}
@@ -120,7 +176,7 @@ export default function CareServices() {
               options={Object.entries(statusConfig).map(([k, v]) => ({ label: v.text, value: k }))}
             />
           </Space>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateVisible(true)}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => { createForm.resetFields(); setCreateVisible(true); }}>
             新建工单
           </Button>
         </div>
@@ -157,7 +213,7 @@ export default function CareServices() {
               {currentRecord.completedAt && (
                 <Descriptions.Item label="完成时间">{formatDateTime(currentRecord.completedAt)}</Descriptions.Item>
               )}
-              {currentRecord.duration && (
+              {currentRecord.duration != null && (
                 <Descriptions.Item label="服务时长">{currentRecord.duration}分钟</Descriptions.Item>
               )}
             </Descriptions>
@@ -167,7 +223,7 @@ export default function CareServices() {
                 {currentRecord.startedAt && (
                   <Descriptions.Item label="服务时间">{formatDateTime(currentRecord.startedAt)}</Descriptions.Item>
                 )}
-                {currentRecord.duration && (
+                {currentRecord.duration != null && (
                   <Descriptions.Item label="服务时长">{currentRecord.duration}分钟</Descriptions.Item>
                 )}
                 {currentRecord.elderStatus && (
@@ -197,26 +253,31 @@ export default function CareServices() {
       </Modal>
 
       <Modal
-        title="新建工单" open={createVisible}
-        onCancel={() => setCreateVisible(false)} onOk={() => setCreateVisible(false)} width={520}
+        title="新建工单"
+        open={createVisible}
+        onCancel={() => setCreateVisible(false)}
+        onOk={handleCreate}
+        okText="确认创建"
+        width={520}
+        destroyOnClose
       >
-        <Form layout="vertical">
-          <Form.Item label="老人姓名" required>
+        <Form form={createForm} layout="vertical" preserve={false}>
+          <Form.Item label="老人姓名" name="elderName" rules={[{ required: true, message: '请输入老人姓名' }]}>
             <Input placeholder="请输入老人姓名" />
           </Form.Item>
-          <Form.Item label="服务类型" required>
+          <Form.Item label="服务类型" name="type" rules={[{ required: true, message: '请选择服务类型' }]}>
             <Select
               placeholder="请选择服务类型"
               options={serviceTypeOptions.map((t) => ({ label: t, value: t }))}
             />
           </Form.Item>
-          <Form.Item label="护工" required>
-            <Select placeholder="请选择护工" options={caregiverOptions} />
+          <Form.Item label="护工" name="caregiverName" rules={[{ required: true, message: '请选择护工' }]}>
+            <Select placeholder="请选择护工" options={caregiverOptions.map(c => ({ label: c.label, value: c.value }))} />
           </Form.Item>
-          <Form.Item label="计划时间" required>
+          <Form.Item label="计划时间" name="scheduledAt" rules={[{ required: true, message: '请选择计划时间' }]}>
             <DatePicker showTime style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="备注">
+          <Form.Item label="备注" name="notes">
             <Input.TextArea rows={3} placeholder="请输入备注信息" />
           </Form.Item>
         </Form>
